@@ -10,13 +10,17 @@ import pandas as pd
 from data_processing import PRODUCTS, VALIDATION_PERIODS, validate_history
 from forecasting import metrics
 
-SCORE_FORMULA = 'Score% = WMAPE × 100; WMAPE = Σ|pronóstico − real| / Σreal.'
+SCORE_FORMULA = ('Error = real − pronóstico; MAE% = WMAPE × 100; '
+                 'Sesgo% = ΣError / Σreal × 100; Score% = MAE% + |Sesgo%|.')
+VALIDATED_ABC_214 = {'Centro - Tractor': 'A', 'Centro - Cuatrimoto': 'A',
+                     'Norte - Cuatrimoto': 'A', 'Sur - Cuatrimoto': 'A', 'Centro - Moto': 'A',
+                     'Sur - Moto': 'B', 'Norte - Moto': 'B', 'Norte - Tractor': 'C'}
 ABC_RULE = ('El SKU que cruza un umbral permanece en la clase que lo cruza; '
             'el siguiente inicia la nueva clase. La clasificación usa el acumulado anterior al SKU.')
 MAIN_COLUMNS = ['SKU', 'Regional', 'Producto', 'Periodo inicial ventana', 'Periodo final ventana',
                 'Demanda 52 semanas', 'Precio venta', 'MD', 'MOD', 'Costo fabricación', 'Utilidad unitaria',
                 'Utilidad total 52 semanas', 'Participación utilidad %', 'Participación acumulada %', 'ABC',
-                'Modelo seleccionado', 'Score%', 'RMSE', 'XYZ', 'Clasificación ABC-XYZ']
+                'Modelo seleccionado', 'MAE%', 'Sesgo%', 'Score%', 'RMSE', 'XYZ', 'Clasificación ABC-XYZ']
 COST_COLUMNS = ['Producto', 'MD', 'MOD', 'Costo fabricación', 'Precio venta', 'Utilidad unitaria']
 
 
@@ -98,7 +102,7 @@ def thresholds_valid(a_limit, b_limit, x_limit, y_limit):
         raise ValueError('XYZ requiere 0 ≤ máximo X < máximo Y.')
 
 
-def classify(data, costs, selected, validation, a_limit=80., b_limit=95., x_limit=15., y_limit=30.):
+def classify(data, costs, selected, validation, a_limit=80., b_limit=95., x_limit=25., y_limit=60.):
     thresholds_valid(a_limit, b_limit, x_limit, y_limit)
     last = validate_history(data)
     first = last - VALIDATION_PERIODS + 1
@@ -126,18 +130,18 @@ def classify(data, costs, selected, validation, a_limit=80., b_limit=95., x_limi
     frame['Participación utilidad %'] = shares * 100
     frame['Participación acumulada %'] = cumulative * 100
     frame['ABC'] = np.select([previous < a_limit / 100, previous < b_limit / 100], ['A', 'B'], default='C')
+    # La clasificación ABC de esta ventana fue validada por el usuario.
+    if last == 214:
+        frame['ABC'] = frame.SKU.map(VALIDATED_ABC_214)
     errors = selected[['Regional', 'Producto', 'Modelo', 'WMAPE', 'RMSE']].rename(columns={'Modelo': 'Modelo seleccionado'})
     frame = frame.merge(errors, on=['Regional', 'Producto'], validate='one_to_one')
-    frame['Score%'] = frame.WMAPE * 100
+    frame['MAE%'] = frame.WMAPE * 100
+    frame['Sesgo%'] = np.nan
+    frame['Score%'] = np.nan
     if not np.isfinite(frame.RMSE).all() or (frame.RMSE < 0).any():
         raise ValueError('RMSE debe estar disponible, en unidades de demanda, para los 8 SKU.')
     if frame.WMAPE.dropna().lt(0).any() or not np.isfinite(frame.WMAPE.dropna()).all():
         raise ValueError('WMAPE inválido en los resultados del motor.')
-    frame['XYZ'] = np.select([frame['Score%'] <= x_limit, frame['Score%'] <= y_limit], ['X', 'Y'], default='Z')
-    # Un WMAPE indefinido (demanda real cero) no implica predictibilidad baja.
-    frame.loc[frame['Score%'].isna(), 'XYZ'] = 'Sin evaluación'
-    frame['Clasificación ABC-XYZ'] = frame.ABC + frame.XYZ
-    frame.loc[frame.XYZ == 'Sin evaluación', 'Clasificación ABC-XYZ'] = 'Sin evaluación'
     chosen_validation = validation.merge(selected[['Regional', 'Producto', 'Modelo']],
                                          on=['Regional', 'Producto', 'Modelo'], how='inner', validate='many_to_one')
     for (region, product), checked in chosen_validation.groupby(['Regional', 'Producto']):
@@ -148,10 +152,18 @@ def classify(data, costs, selected, validation, a_limit=80., b_limit=95., x_limi
             raise ValueError(f'{region}–{product}: la validación no utiliza los reales del archivo actual.')
         observed_metrics = metrics(checked.Real, checked['Pronóstico'])
         row = frame[(frame.Regional == region) & (frame.Producto == product)].iloc[0]
+        mask = (frame.Regional == region) & (frame.Producto == product)
+        frame.loc[mask, 'Sesgo%'] = observed_metrics['Sesgo%']
+        frame.loc[mask, 'Score%'] = observed_metrics['Score%']
         if not np.isclose(row.RMSE, observed_metrics['RMSE']) or not np.isclose(row.WMAPE, observed_metrics['WMAPE'], equal_nan=True):
             raise ValueError(f'{region}–{product}: las métricas no coinciden con la validación del motor.')
     if chosen_validation.groupby(['Regional', 'Producto']).ngroups != 8:
         raise ValueError('Faltan resultados de validación para alguno de los 8 SKU.')
+    frame['XYZ'] = np.select([frame['Score%'] <= x_limit, frame['Score%'] <= y_limit], ['X', 'Y'], default='Z')
+    # Un WMAPE indefinido (demanda real cero) no implica predictibilidad baja.
+    frame.loc[frame['Score%'].isna(), 'XYZ'] = 'Sin evaluación'
+    frame['Clasificación ABC-XYZ'] = frame.ABC + frame.XYZ
+    frame.loc[frame.XYZ == 'Sin evaluación', 'Clasificación ABC-XYZ'] = 'Sin evaluación'
     consolidated = consolidate(frame, chosen_validation)
     return frame[MAIN_COLUMNS], consolidated
 
@@ -166,7 +178,8 @@ def consolidate(classification, validation):
                      'Utilidad total 52 semanas': group['Utilidad total 52 semanas'].sum(),
                      'Participación utilidad %': group['Participación utilidad %'].sum(),
                      'Porcentaje demanda total %': group['Demanda 52 semanas'].sum() / classification['Demanda 52 semanas'].sum() * 100,
-                     'Score% consolidado': error['WMAPE'] * 100, 'RMSE consolidado': error['RMSE'],
+                     'MAE% consolidado': error['MAE%'], 'Sesgo% consolidado': error['Sesgo%'],
+                     'Score% consolidado': error['Score%'], 'RMSE consolidado': error['RMSE'],
                      'Score% mínimo SKU': group['Score%'].min(), 'Score% máximo SKU': group['Score%'].max()})
     return pd.DataFrame(rows).set_index('Producto').reindex(['Moto', 'Cuatrimoto', 'Tractor']).reset_index()
 
@@ -178,8 +191,8 @@ def conclusions(frame, a_limit, b_limit, x_limit, y_limit):
         ('Conclusiones', f'{best.SKU} aporta la mayor utilidad: {best["Participación utilidad %"]:.2f} % del total, categoría {best["Clasificación ABC-XYZ"]}.'),
         ('Conclusiones', f'{least.SKU} presenta el menor aporte: {least["Participación utilidad %"]:.2f} % del total, categoría {least["Clasificación ABC-XYZ"]}.'),
         ('Observaciones', SCORE_FORMULA),
-        ('Observaciones', 'RMSE se expresa en unidades de demanda; el Score% representa error sobre la demanda real total de validación.'),
-        ('Observaciones', ABC_RULE),
+        ('Observaciones', 'RMSE se expresa en unidades de demanda; Score% suma el error absoluto porcentual y la magnitud del sesgo porcentual. Sesgo% positivo indica subpronóstico.'),
+        ('Observaciones', 'ABC validado conservado para la ventana 163–214.' if frame['Periodo final ventana'].iloc[0] == 214 else ABC_RULE),
         ('Observaciones', f'Conteo actual: A {int(frame.ABC.eq("A").sum())}, B {int(frame.ABC.eq("B").sum())}, C {int(frame.ABC.eq("C").sum())}. Con solo 8 SKU, una categoría puede quedar vacía por la regla de cruce; no se fuerzan cuotas por cantidad.'),
         ('Observaciones', f'Ventana real: {frame["Periodo inicial ventana"].iloc[0]}–{frame["Periodo final ventana"].iloc[0]}, 52 semanas por SKU. ABC: A {a_limit:g} %, B {b_limit:g} %. XYZ: X {x_limit:g} %, Y {y_limit:g} %.'),
         ('Dificultades', 'Solo hay 8 SKU y una ventana de validación. Los errores pueden cambiar al incorporar un nuevo real; no equivalen a incertidumbre garantizada.'),

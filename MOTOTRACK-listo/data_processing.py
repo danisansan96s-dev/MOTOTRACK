@@ -11,13 +11,9 @@ VALIDATION_PERIODS = 52
 
 
 def default_workbook_path(directory):
-    """Prefiere la exportación moto-track-N.xlsx más avanzada; usa la base si no hay otra."""
-    directory = Path(directory)
-    candidates = [directory / 'moto-track.xlsx']
-    candidates.extend(path for path in directory.glob('moto-track-*.xlsx')
-                      if path.stem.rsplit('-', 1)[-1].isdigit())
-    return max(candidates, key=lambda path: int(path.stem.rsplit('-', 1)[-1])
-               if path.stem.rsplit('-', 1)[-1].isdigit() else 0)
+    """Fuente actual explícita; nunca sustituye silenciosamente por el histórico 209."""
+    return Path(directory) / 'moto-track (6).xlsx'
+
 
 
 def validate_history(data):

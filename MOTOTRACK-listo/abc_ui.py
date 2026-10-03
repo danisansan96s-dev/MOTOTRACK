@@ -14,10 +14,10 @@ def render_classification(data, selected, validation, abc_tab, consolidated_tab,
     st.sidebar.divider()
     st.sidebar.subheader('Clasificación ABC-XYZ')
     uploaded = uploaded_costs
-    a_limit = st.sidebar.number_input('Límite A (%)', min_value=0.1, max_value=99.9, value=80., step=1., key='abc_limit_a')
-    b_limit = st.sidebar.number_input('Límite B (%)', min_value=0.2, max_value=100., value=95., step=1., key='abc_limit_b')
-    x_limit = st.sidebar.number_input('Máximo Score% para X', min_value=0., value=15., step=1., key='xyz_limit_x')
-    y_limit = st.sidebar.number_input('Máximo Score% para Y', min_value=0., value=30., step=1., key='xyz_limit_y')
+    a_limit = st.sidebar.number_input('Límite A (%)', min_value=0.1, max_value=99.9, value=80., step=1., key='abc_limit_a', disabled=int(data.Periodo.max()) == 214)
+    b_limit = st.sidebar.number_input('Límite B (%)', min_value=0.2, max_value=100., value=95., step=1., key='abc_limit_b', disabled=int(data.Periodo.max()) == 214)
+    x_limit = st.sidebar.number_input('Máximo Score% para X', min_value=0., value=25., step=1., key='xyz_limit_x')
+    y_limit = st.sidebar.number_input('Máximo Score% para Y', min_value=0., value=60., step=1., key='xyz_limit_y')
     parameters = {'Límite A (%)': a_limit, 'Límite B (%)': b_limit,
                   'Máximo Score% X': x_limit, 'Máximo Score% Y': y_limit}
     destination = root / 'data' / 'costos_actuales.xlsx'
@@ -75,7 +75,7 @@ def render_classification(data, selected, validation, abc_tab, consolidated_tab,
         st.caption(f'XYZ reutiliza la validación del motor sobre los periodos {first}–{last}; '
                    f'los modelos se entrenan con los anteriores (1–{first - 1}). '
                    'RMSE se conserva en unidades de demanda. No se utiliza CV ni CV² para XYZ.')
-        st.caption(ABC_RULE)
+        st.caption('ABC validado conservado para la ventana 163–214.' if last == 214 else ABC_RULE)
         if table['Score%'].isna().any():
             st.warning('Algunos SKU tienen demanda real cero: WMAPE no está definido y XYZ se muestra como Sin evaluación.')
         st.download_button('Descargar reporte ABC-XYZ en Excel',

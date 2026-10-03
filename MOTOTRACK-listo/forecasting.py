@@ -49,7 +49,10 @@ def predict(y, model, horizon):
 def metrics(actual, prediction):
     actual, prediction = np.asarray(actual, float), np.asarray(prediction, float)
     error = prediction - actual
-    return {'MAE': float(np.abs(error).mean()), 'RMSE': float(np.sqrt(np.mean(error ** 2))),
+    total = actual.sum()
+    mae_pct = float(np.abs(error).sum() / total * 100) if total else np.nan
+    bias_pct = float(-error.sum() / total * 100) if total else np.nan
+    return {'MAE%': mae_pct, 'Sesgo%': bias_pct, 'Score%': mae_pct + abs(bias_pct), 'MAE': float(np.abs(error).mean()), 'RMSE': float(np.sqrt(np.mean(error ** 2))),
             'WMAPE': float(np.abs(error).sum() / actual.sum()) if actual.sum() else np.nan,
             'Bias': float(error.mean()),
             'MAPE': float(np.mean(np.abs(error) / actual)) if np.all(actual > 0) else np.nan}
@@ -70,9 +73,14 @@ def evaluate(data):
     rows, validations = [], []
     for (region, product), g in data.groupby(['Regional', 'Producto']):
         history = g.sort_values('Periodo')
-        y = history.Demanda.to_numpy()
-        train, actual = y[:-VALIDATION_PERIODS], y[-VALIDATION_PERIODS:]
-        validation_periods = history.Periodo.to_numpy()[-VALIDATION_PERIODS:]
+        last = int(history.Periodo.max())
+        first = last - VALIDATION_PERIODS + 1
+        train = history.loc[history.Periodo < first, 'Demanda'].to_numpy()
+        window = history.loc[history.Periodo.between(first, last)]
+        actual = window.Demanda.to_numpy()
+        validation_periods = window.Periodo.to_numpy()
+        if len(window) != VALIDATION_PERIODS:
+            raise ValueError('La ventana de validación debe contener exactamente 52 periodos.')
         for model in MODELS:
             row = {'Regional': region, 'Producto': product, 'Modelo': model}
             try:
@@ -80,7 +88,7 @@ def evaluate(data):
                 row.update(metrics(actual, predicted), Estado='OK', Aviso=notes)
                 validations.extend((region, product, model, p, a, f) for p, a, f in zip(validation_periods, actual, predicted))
             except Exception as exc:
-                row.update({m: np.nan for m in ['MAE', 'RMSE', 'WMAPE', 'Bias', 'MAPE']}, Estado='Error', Aviso=str(exc))
+                row.update({m: np.nan for m in ['MAE', 'RMSE', 'WMAPE', 'Bias', 'MAPE', 'MAE%', 'Sesgo%', 'Score%']}, Estado='Error', Aviso=str(exc))
             rows.append(row)
     comparison = pd.DataFrame(rows)
     selected = pd.DataFrame([choose(g).drop(labels=['Sesgo absoluto'], errors='ignore') for _, g in comparison.groupby(['Regional','Producto'])]).reset_index(drop=True)

@@ -36,7 +36,7 @@ def main():
     if default_path.is_file():
         st.sidebar.caption(f'Archivo local: {default_path.name}. Puede cargar una exportación más reciente.')
     if uploaded is None and not default_path.is_file():
-        st.info('Carga un archivo de demanda MotoTrak en la barra lateral para comenzar. '
+        st.info('Carga un archivo de demanda MotoTrak en la barra lateral para comenzar. Falta moto-track (6).xlsx; no se sustituye por el histórico 209. '
                 'También puedes cargar el archivo de costos para la clasificación ABC-XYZ.')
         return
     try:

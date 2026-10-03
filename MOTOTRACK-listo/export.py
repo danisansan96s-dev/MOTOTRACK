@@ -22,12 +22,12 @@ def export_abc_excel(costs, classification, consolidated, conclusions, parameter
     from abc_xyz import SCORE_FORMULA, ABC_RULE
     buffer = BytesIO()
     models = classification[['SKU', 'Regional', 'Producto', 'Periodo inicial ventana', 'Periodo final ventana',
-                             'Modelo seleccionado', 'Score%', 'RMSE']].copy()
+                             'Modelo seleccionado', 'MAE%', 'Sesgo%', 'Score%', 'RMSE']].copy()
     models['Fórmula Score%'] = SCORE_FORMULA
     metadata = pd.DataFrame([
         ('Score%', SCORE_FORMULA), ('RMSE', 'Unidades de demanda; no es porcentaje.'),
         ('ABC', 'Demanda de las últimas 52 semanas × utilidad unitaria del archivo.'),
-        ('Cruce de umbral ABC', ABC_RULE),
+        ('Cruce de umbral ABC', 'ABC validado conservado para la ventana 163–214.' if classification['Periodo final ventana'].iloc[0] == 214 else ABC_RULE),
         ('Consolidado', 'Error de la suma de pronósticos de los modelos elegidos frente a la suma de los reales; no se promedian RMSE.'),
         ('Ventana', f'{classification["Periodo inicial ventana"].iloc[0]}–{classification["Periodo final ventana"].iloc[0]}, 52 semanas por SKU.'),
         ('Costos', 'Se conservan MD, MOD, costo, precio y utilidad del archivo utilizado. Solo si falta la columna Utilidad unitaria se calcula precio − costo.'),
