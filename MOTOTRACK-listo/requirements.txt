@@ -1,0 +1,8 @@
+pandas==3.0.6
+numpy==2.4.6
+statsmodels==0.15.0
+plotly==7.1.0
+streamlit==1.64.0
+openpyxl==3.1.5
+Jinja2==3.1.6
+websockets==16.1.1
